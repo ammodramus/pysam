@@ -1457,7 +1457,8 @@ cdef class AlignmentFile(HTSFile):
                        quality_threshold=15,
                        read_callback='all',
                        reference=None,
-                       end=None):
+                       end=None,
+                       separate_orientations = False):
         """count the coverage of genomic positions by reads in :term:`region`.
 
         The region is specified by :term:`contig`, `start` and `stop`.
@@ -1510,6 +1511,10 @@ cdef class AlignmentFile(HTSFile):
         end : int
             backward compatible synonym for `stop`
 
+        separate_orientations: bool
+            if true, return two-tuple of counts in forward and reverse
+            orientations
+
         Raises
         ------
 
@@ -1533,16 +1538,30 @@ cdef class AlignmentFile(HTSFile):
         if _stop < _start:
             raise ValueError("interval of size less than 0")
         
+        cdef bint sep_orient = separate_orientations
+
         cdef int length = _stop - _start
         cdef c_array.array int_array_template = array.array('L', [])
         cdef c_array.array count_a
         cdef c_array.array count_c
         cdef c_array.array count_g
         cdef c_array.array count_t
+
+        cdef c_array.array count_a_r
+        cdef c_array.array count_c_r
+        cdef c_array.array count_g_r
+        cdef c_array.array count_t_r
+
         count_a = c_array.clone(int_array_template, length, zero=True)
         count_c = c_array.clone(int_array_template, length, zero=True)
         count_g = c_array.clone(int_array_template, length, zero=True)
         count_t = c_array.clone(int_array_template, length, zero=True)
+        if sep_orient:
+            count_a_r = c_array.clone(int_array_template, length, zero=True)
+            count_c_r = c_array.clone(int_array_template, length, zero=True)
+            count_g_r = c_array.clone(int_array_template, length, zero=True)
+            count_t_r = c_array.clone(int_array_template, length, zero=True)
+
 
         cdef AlignedSegment read
         cdef cython.str seq
@@ -1551,6 +1570,7 @@ cdef class AlignmentFile(HTSFile):
         cdef int refpos
         cdef int c = 0
         cdef int filter_method = 0
+
 
 
         if read_callback == "all":
@@ -1587,16 +1607,40 @@ cdef class AlignmentFile(HTSFile):
 
                     # only check base quality if _threshold > 0
                     if (_threshold and quality and quality[qpos] >= _threshold) or not _threshold:
-                        if seq[qpos] == 'A':
-                            count_a.data.as_ulongs[refpos - _start] += 1
-                        if seq[qpos] == 'C':
-                            count_c.data.as_ulongs[refpos - _start] += 1
-                        if seq[qpos] == 'G':
-                            count_g.data.as_ulongs[refpos - _start] += 1
-                        if seq[qpos] == 'T':
-                            count_t.data.as_ulongs[refpos - _start] += 1
+                        if not sep_orient:
+                            if seq[qpos] == 'A':
+                                count_a.data.as_ulongs[refpos - _start] += 1
+                            elif seq[qpos] == 'C':
+                                count_c.data.as_ulongs[refpos - _start] += 1
+                            elif seq[qpos] == 'G':
+                                count_g.data.as_ulongs[refpos - _start] += 1
+                            elif seq[qpos] == 'T':
+                                count_t.data.as_ulongs[refpos - _start] += 1
+                        else:
+                            if not read.is_reverse:
+                                if seq[qpos] == 'A':
+                                    count_a.data.as_ulongs[refpos - _start] += 1
+                                elif seq[qpos] == 'C':
+                                    count_c.data.as_ulongs[refpos - _start] += 1
+                                elif seq[qpos] == 'G':
+                                    count_g.data.as_ulongs[refpos - _start] += 1
+                                elif seq[qpos] == 'T':
+                                    count_t.data.as_ulongs[refpos - _start] += 1
+                            else:
+                                if seq[qpos] == 'A':
+                                    count_a_r.data.as_ulongs[refpos - _start] += 1
+                                elif seq[qpos] == 'C':
+                                    count_c_r.data.as_ulongs[refpos - _start] += 1
+                                elif seq[qpos] == 'G':
+                                    count_g_r.data.as_ulongs[refpos - _start] += 1
+                                elif seq[qpos] == 'T':
+                                    count_t_r.data.as_ulongs[refpos - _start] += 1
 
-        return count_a, count_c, count_g, count_t
+
+        if not sep_orient:
+            return count_a, count_c, count_g, count_t
+        else:
+            return (count_a, count_c, count_g, count_t), (count_a_r, count_c_r, count_g_r, count_t_r)
 
     def find_introns_slow(self, read_iterator):
         """Return a dictionary {(start, stop): count}
